@@ -54,11 +54,9 @@ router.post("/register", authenticateToken, async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res
-        .status(404)
-        .json({
-          error: "Device not found - make sure it is powered on and connected",
-        });
+      return res.status(404).json({
+        error: "Device not found - make sure it is powered on and connected",
+      });
     }
 
     res.json(result.rows[0]);
@@ -152,4 +150,70 @@ router.post("/:deviceId/stop", authenticateToken, async (req, res) => {
   }
 });
 
+// Set moisture config
+router.post("/:deviceId/moisture", authenticateToken, async (req, res) => {
+  const { pump, active, threshold, duration, cooldown_period } = req.body;
+
+  try {
+    const device = await pool.query(
+      `SELECT * FROM devices WHERE device_id = $1 AND user_id = $2`,
+      [req.params.deviceId, req.user.id],
+    );
+
+    if (device.rows.length === 0) {
+      return res.status(404).json({ error: "Device not found" });
+    }
+
+    // Save to database
+    await pool.query(
+      `INSERT INTO moisture_configs (device_id, pump, active, threshold, duration, cooldown_period)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (device_id, pump) DO UPDATE
+       SET active = $3, threshold = $4, duration = $5, cooldown_period = $6`,
+      [req.params.deviceId, pump, active, threshold, duration, cooldown_period],
+    );
+
+    // Send to device via MQTT
+    const mqttClient = req.app.get("mqttClient");
+    const topic = `qydra/${req.params.deviceId}/commands`;
+    const payload = JSON.stringify({
+      action: "set_moisture",
+      pump,
+      active,
+      threshold,
+      duration,
+      cooldown_period,
+    });
+    mqttClient.publish(topic, payload);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Get moisture configs
+router.get("/:deviceId/moisture", authenticateToken, async (req, res) => {
+  try {
+    const device = await pool.query(
+      `SELECT * FROM devices WHERE device_id = $1 AND user_id = $2`,
+      [req.params.deviceId, req.user.id],
+    );
+
+    if (device.rows.length === 0) {
+      return res.status(404).json({ error: "Device not found" });
+    }
+
+    const result = await pool.query(
+      `SELECT * FROM moisture_configs WHERE device_id = $1 ORDER BY pump`,
+      [req.params.deviceId],
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 module.exports = router;
