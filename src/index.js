@@ -19,7 +19,7 @@ app.use(express.json());
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 500,
   message: { error: "Too many requests, please try again later" },
 });
 
@@ -43,7 +43,7 @@ app.get("/health", (req, res) => {
 
 const server = http.createServer(app);
 
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ server, path: "/ws" });
 
 const clients = new Map();
 
