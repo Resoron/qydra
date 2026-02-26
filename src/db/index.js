@@ -1,5 +1,6 @@
 const { Pool } = require("pg");
 const dotenv = require("dotenv");
+const rateLimit = require("express-rate-limit");
 
 dotenv.config();
 

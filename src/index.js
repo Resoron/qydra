@@ -8,11 +8,28 @@ const deviceRoutes = require("./routes/devices");
 const sensorRoutes = require("./routes/sensors");
 const scheduleRoutes = require("./routes/schedules");
 const connectMQTT = require("./mqtt");
+const rateLimit = require("express-rate-limit");
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { error: "Too many requests, please try again later" },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: "Too many login attempts, please try again later" },
+});
+
+app.use(limiter);
+app.use("/api/auth", authLimiter);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/devices", deviceRoutes);
@@ -23,13 +40,10 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", message: "Qydra server is running" });
 });
 
-// Create HTTP server so WebSocket can share the same port
 const server = http.createServer(app);
 
-// WebSocket server
 const wss = new WebSocket.Server({ server });
 
-// Track connected clients and which device they are subscribed to
 const clients = new Map();
 
 wss.on("connection", (ws) => {
@@ -38,8 +52,6 @@ wss.on("connection", (ws) => {
   ws.on("message", (message) => {
     try {
       const data = JSON.parse(message.toString());
-
-      // Client sends { type: "subscribe", device_id: "abc123", token: "jwt..." }
       if (data.type === "subscribe") {
         clients.set(ws, { device_id: data.device_id });
         console.log(`Client subscribed to device ${data.device_id}`);
@@ -63,7 +75,6 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Function to broadcast sensor data to subscribed clients
 const broadcastSensorData = (deviceId, data) => {
   clients.forEach((clientInfo, ws) => {
     if (clientInfo.device_id === deviceId && ws.readyState === WebSocket.OPEN) {
@@ -78,7 +89,6 @@ const broadcastSensorData = (deviceId, data) => {
   });
 };
 
-// Make MQTT client and broadcast function available to routes and mqtt.js
 const mqttClient = connectMQTT(broadcastSensorData);
 app.set("mqttClient", mqttClient);
 
